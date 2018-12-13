@@ -206,8 +206,17 @@ def test_sql_dict_query_params(sentry_init, capture_events):
     assert crumb["message"] == ("SELECT count(*) FROM people_person WHERE foo = 10")
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        lambda sql: sql.SQL("SELECT %(my_param)s FROM {mytable}").format(
+            mytable=sql.Identifier("foobar")
+        ),
+        lambda sql: sql.SQL("SELECT %(my_param)s FROM foobar"),
+    ],
+)
 @pytest.mark.django_db
-def test_sql_psycopg2_string_composition(sentry_init, capture_events):
+def test_sql_psycopg2_string_composition(sentry_init, capture_events, query):
     sentry_init(integrations=[DjangoIntegration()], send_default_pii=True)
     from django.db import connection
 
@@ -218,17 +227,15 @@ def test_sql_psycopg2_string_composition(sentry_init, capture_events):
 
     events = capture_events()
     with pytest.raises(TypeError):
-        # crashes because we use sqlite
-        sql.execute(
-            psycopg2_sql.SQL("SELECT %(my_param)s FROM people_person"), {"my_param": 10}
-        )
+        # table doesn't even exist
+        sql.execute(query(psycopg2_sql), {"my_param": 10})
 
     capture_message("HI")
 
     event, = events
 
     crumb, = event["breadcrumbs"]
-    assert crumb["message"] == ("SELECT 10 FROM people_person")
+    assert crumb["message"] == ("SELECT 10 FROM foobar")
 
 
 @pytest.mark.django_db
